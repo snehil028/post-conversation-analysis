@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
 import textstat
 
-# Simple lazy loading so imports are cheap at start
+
 _sbert = None
 _sentiment_pipe = None
 
@@ -16,7 +16,7 @@ _sentiment_pipe = None
 def get_sbert():
     global _sbert
     if _sbert is None:
-        # small / fast model
+       
         _sbert = SentenceTransformer("all-MiniLM-L6-v2")
     return _sbert
 
@@ -44,7 +44,6 @@ COMPLETE_HINTS = ["here's", "here is", "in summary", "steps to",
 ASSERTIVE_WORDS = ["is", "are", "was", "has been", "will",
                    "was shipped", "arrive", "delivered", "confirmed"]
 
-# Helper small functions
 
 
 def contains_any(text: str, patterns: List[str]) -> bool:
@@ -57,11 +56,7 @@ def contains_any(text: str, patterns: List[str]) -> bool:
 
 
 def word_overlap_score(a: str, b: str) -> float:
-    """
-    Very simple 'accuracy' proxy:
-    - Return fraction of shared words between user message and AI reply.
-    - This is NOT real accuracy but a cheap heuristic: if AI repeats important tokens from user, it's more likely relevant/accurate.
-    """
+   
     a_words = set(re.findall(r"\w+", a.lower()))
     b_words = set(re.findall(r"\w+", b.lower()))
     if not a_words or not b_words:
@@ -69,21 +64,13 @@ def word_overlap_score(a: str, b: str) -> float:
     overlap = a_words.intersection(b_words)
     return len(overlap) / max(1, len(a_words))
 
-# Main analysis function
+
 
 
 def analyze_conversation(conv) -> Dict[str, object]:
-    """
-    conv is expected to be a Conversation instance (Django model) where conv.messages is iterable
-    and each message object has at least:
-        - sender (string: 'user' or 'ai')
-        - text (string)
-        - optional: timestamp (datetime). If not present, function uses mock delays.
+   
 
-    Returns a dict with many metrics (clarity, relevance, accuracy, completeness, sentiment, empathy, response_time, fallback_count, resolution, escalation_need, overall_score).
-    """
-
-    # Step 1: collect ordered messages
+    # collect ordered messages
     messages = list(conv.messages.order_by("id"))
     if not messages:
         return {}
@@ -92,7 +79,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
     user_texts = [m.text for m in messages if m.sender == "user"]
     ai_texts = [m.text for m in messages if m.sender == "ai"]
 
-    # Step 2: sentiment (last up-to-3 user messages)
+    #  sentiment- last up-to-3 user messages
     sentiment = None
     if user_texts:
         text_for_sent = " ".join(user_texts[-3:])
@@ -104,7 +91,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
         except Exception:
             sentiment = None
 
-    # Step 3: clarity of AI replies (Flesch reading ease)
+    #  clarity of AI replies 
     clarity_vals = []
     for t in ai_texts:
         try:
@@ -116,7 +103,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
     # normalize to 0..1 roughly
     clarity_score = max(0.0, min(1.0, avg_clarity / 100.0))
 
-    # Step 4: relevance via SBERT for AI reply vs previous user message
+    # relevance thru sbert for AI reply vs previous user message
     relevance_scores = []
     sbert = get_sbert()
     for i, msg in enumerate(messages):
@@ -126,32 +113,31 @@ def analyze_conversation(conv) -> Dict[str, object]:
                 u_emb = sbert.encode(
                     messages[i-1].text, convert_to_tensor=True)
                 sim = util.cos_sim(a_emb, u_emb).item()
-                # sims often ~0..1 for related sentences; clamp
+              
                 relevance_scores.append(max(-1.0, min(1.0, float(sim))))
             except Exception:
                 continue
     relevance_score = float(sum(relevance_scores) /
                             len(relevance_scores)) if relevance_scores else 0.0
 
-    # Step 5: empathy heurstic
+    # empathy heurstic
     empathy_hits = 0
     for t in ai_texts:
         if contains_any(t, EMPATHY_PHRASES):
             empathy_hits += 1
     empathy_score = (empathy_hits / max(1, len(ai_texts))) if ai_texts else 0.0
 
-    # Step 6: fallback count
+    #fallback count
     fallback_count = 0
     for t in ai_texts:
         if contains_any(t, FALLBACK_PATTERNS):
             fallback_count += 1
 
-    # Step 7: resolution detection
+    #resolution detection
     resolved = any(re.search(
         r"\b(thanks|thank you|that helps|resolved|fixed|works now)\b", u.lower()) for u in user_texts)
 
-    # Step 8: response time (average seconds between consecutive messages)
-    # if messages have .timestamp (datetime), use it; otherwise use mock delays
+    # response time (average seconds between consecutive messages);if messages have .timestamp (datetime), use it; otherwise use mock delays
     times = []
     for m in messages:
         ts = getattr(m, "timestamp", None)
@@ -160,7 +146,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
         else:
             times.append(None)
 
-    # if all timestamps are None -> generate mock times by picking random gaps (in seconds)
+    # if all timestamps are None,gnerate mock times by picking random gaps (in seconds)
     if all(t is None for t in times):
         mock = datetime.utcnow()
         times = []
@@ -190,7 +176,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
         diffs.append(delta)
     avg_response_time = sum(diffs) / len(diffs) if diffs else 0.0
 
-    # --- Step 9: accuracy heuristic (word overlap between a user message and the AI reply that follows) ---
+    # accuracy heuristic (word overlap between a user message and the AI reply that follows) ---
     accuracy_scores = []
     for i, m in enumerate(messages):
         if m.sender == "ai" and i > 0 and messages[i-1].sender == "user":
@@ -204,7 +190,7 @@ def analyze_conversation(conv) -> Dict[str, object]:
     accuracy_score = float(sum(accuracy_scores) /
                            len(accuracy_scores)) if accuracy_scores else 0.0
 
-    # Step 10: completeness heuristic (does AI provide an answer vs ask fro info)
+    # completeness heuristic (does AI provide an answer vs ask fro info)
     completeness_scores = []
     for i, m in enumerate(messages):
         if m.sender == "ai":
@@ -217,22 +203,20 @@ def analyze_conversation(conv) -> Dict[str, object]:
             if contains_any(text, COMPLETE_HINTS):
                 completeness_scores.append(1.0)
                 continue
-            # otherwise use a middle score based on length
-            # short -> low, long -> higher
+            # otherwise use a middle score based on lengt
             completeness_scores.append(min(1.0, len(text.split()) / 40.0))
     completeness_score = float(sum(
         completeness_scores) / len(completeness_scores)) if completeness_scores else 0.0
 
-    # Step 11: escalation need heuristic
-    # escalate if negative sentiment, many fallbacks, low accuracy or user explicitly asks escalate
+    # escalation need heuristic
     user_asks_escalation = any(re.search(
         r"\b(human|agent|someone else|supervisor|manager|escalat)\b", u.lower()) for u in user_texts)
     escalation_need = False
     if sentiment == "negative" or fallback_count > 2 or accuracy_score < 0.2 or user_asks_escalation:
         escalation_need = True
 
-    # Step 12: overall score
-    # avg the five main numeric signals (clarity, relevance, empathy, accuracy, completeness)
+    # overall score
+
     overall_score = (clarity_score + relevance_score +
                      empathy_score + accuracy_score + completeness_score) / 5.0
 
@@ -253,8 +237,4 @@ def analyze_conversation(conv) -> Dict[str, object]:
 
     return results
 
-# ---------------- Example usage (for a fresher) -----------------
-# from your_app.models import Conversation
-# conv = Conversation.objects.get(pk=1)
-# metrics = analyze_conversation_simple(conv)
-# print(metrics)
+
