@@ -16,8 +16,6 @@ It exposes REST APIs for uploading chats and runs a scheduled daily task (using 
 
 ---
 
-## 1. Setup Instructions (Step-by-Step)
-
 ### Prerequisites
 Make sure these are installed:
 - Python 3.10+
